@@ -46,6 +46,7 @@ const checkMembership = async (ctx) => {
     );
     return ["member", "administrator", "creator"].includes(chatMember.status);
   } catch (error) {
+    console.error("❌ خطا در بررسی عضویت:", error);
     return false;
   }
 };
