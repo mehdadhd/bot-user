@@ -3,28 +3,35 @@ const { Telegraf } = require("telegraf");
 const mongoose = require("mongoose");
 const User = require("./database/user");
 
-if (!process.env.BOT_TOKEN) {
-  console.error("❌ متغیر BOT_TOKEN مقداردهی نشده!");
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const MONGO_URI = process.env.MONGO_URI;
+const CHANNEL_USERNAME = process.env.CHANNEL_USERNAME;
+
+if (!BOT_TOKEN) {
+  console.error("❌ خطا: متغیر محیطی BOT_TOKEN تنظیم نشده است.");
+  process.exit(1);
+}
+if (!MONGO_URI) {
+  console.error("❌ خطا: متغیر محیطی MONGO_URI تنظیم نشده است.");
+  process.exit(1);
+}
+if (!CHANNEL_USERNAME) {
+  console.error("❌ خطا: متغیر محیطی CHANNEL_USERNAME تنظیم نشده است.");
   process.exit(1);
 }
 
-if (!process.env.MONGO_URI) {
-  console.error("❌ متغیر MONGO_URI مقداردهی نشده!");
-  process.exit(1);
-}
-
-const bot = new Telegraf(process.env.BOT_TOKEN);
+const bot = new Telegraf(BOT_TOKEN);
 
 // اتصال به دیتابیس MongoDB
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI, {
+    await mongoose.connect(MONGO_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });
     console.log("✅ اتصال موفق به دیتابیس");
   } catch (error) {
-    console.error("❌ خطا در اتصال به دیتابیس:", error.message);
+    console.error("❌ خطا در اتصال به دیتابیس:", error);
     process.exit(1);
   }
 };
@@ -34,7 +41,7 @@ connectDB();
 const checkMembership = async (ctx) => {
   try {
     const chatMember = await ctx.telegram.getChatMember(
-      "@visitell",
+      `@${CHANNEL_USERNAME}`,
       ctx.from.id
     );
     return ["member", "administrator", "creator"].includes(chatMember.status);
@@ -49,7 +56,12 @@ bot.start(async (ctx) => {
     return ctx.reply("لطفاً ابتدا در کانال عضو شوید:", {
       reply_markup: {
         inline_keyboard: [
-          [{ text: "📢 ورود به کانال", url: "https://t.me/visitell" }],
+          [
+            {
+              text: "📢 ورود به کانال",
+              url: `https://t.me/${CHANNEL_USERNAME}`,
+            },
+          ],
           [{ text: "✅ بررسی عضویت", callback_data: "check_membership" }],
         ],
       },
