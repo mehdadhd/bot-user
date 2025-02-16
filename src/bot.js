@@ -34,7 +34,7 @@ connectDB();
 const checkMembership = async (ctx) => {
   try {
     const chatMember = await ctx.telegram.getChatMember(
-      "@YourChannel",
+      "@visitell",
       ctx.from.id
     );
     return ["member", "administrator", "creator"].includes(chatMember.status);
@@ -49,7 +49,7 @@ bot.start(async (ctx) => {
     return ctx.reply("لطفاً ابتدا در کانال عضو شوید:", {
       reply_markup: {
         inline_keyboard: [
-          [{ text: "📢 ورود به کانال", url: "https://t.me/YourChannel" }],
+          [{ text: "📢 ورود به کانال", url: "https://t.me/visitell" }],
           [{ text: "✅ بررسی عضویت", callback_data: "check_membership" }],
         ],
       },
