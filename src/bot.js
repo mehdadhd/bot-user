@@ -1,124 +1,128 @@
-require('dotenv').config();
-const { Telegraf } = require('telegraf');
-const axios = require('axios');
-const mongoose = require('mongoose');
-const User = require('./database/user');
-const { connectDB } = require('./db');
+require("dotenv").config();
+const { Telegraf } = require("telegraf");
+const mongoose = require("mongoose");
+const User = require("./database/user");
 
-// اتصال به دیتابیس
-connectDB();
+if (!process.env.BOT_TOKEN) {
+  console.error("❌ متغیر BOT_TOKEN مقداردهی نشده!");
+  process.exit(1);
+}
+
+if (!process.env.MONGO_URI) {
+  console.error("❌ متغیر MONGO_URI مقداردهی نشده!");
+  process.exit(1);
+}
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const userRegistration = new Map(); // ذخیره وضعیت کاربران در حال ثبت‌نام
+
+// اتصال به دیتابیس MongoDB
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    console.log("✅ اتصال موفق به دیتابیس");
+  } catch (error) {
+    console.error("❌ خطا در اتصال به دیتابیس:", error.message);
+    process.exit(1);
+  }
+};
+connectDB();
+
+// بررسی عضویت در کانال
+const checkMembership = async (ctx) => {
+  try {
+    const chatMember = await ctx.telegram.getChatMember(
+      "@YourChannel",
+      ctx.from.id
+    );
+    return ["member", "administrator", "creator"].includes(chatMember.status);
+  } catch (error) {
+    return false;
+  }
+};
 
 bot.start(async (ctx) => {
-    ctx.reply('سلام! لطفاً ابتدا عضو کانال ما شوید.', {
-        reply_markup: {
-            inline_keyboard: [
-                [{ text: '📢 عضویت در کانال', url: `https://t.me/${process.env.CHANNEL_USERNAME.replace('@', '')}` }],
-                [{ text: '✅ بررسی عضویت', callback_data: 'check_membership' }]
-            ]
-        }
+  const isMember = await checkMembership(ctx);
+  if (!isMember) {
+    return ctx.reply("لطفاً ابتدا در کانال عضو شوید:", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📢 ورود به کانال", url: "https://t.me/YourChannel" }],
+          [{ text: "✅ بررسی عضویت", callback_data: "check_membership" }],
+        ],
+      },
     });
+  }
+
+  const existingUser = await User.findOne({ telegramId: ctx.from.id });
+  if (!existingUser) {
+    return ctx.reply("🚀 برای استفاده از ربات، لطفاً ابتدا ثبت‌نام کنید.", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📝 ایجاد حساب کاربری", callback_data: "register_user" }],
+        ],
+      },
+    });
+  }
+
+  ctx.reply("🎉 خوش آمدید! شما در حال حاضر ثبت‌نام شده‌اید.");
 });
 
-bot.action('check_membership', async (ctx) => {
-    try {
-        const chatMember = await axios.get(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/getChatMember`, {
-            params: {
-                chat_id: process.env.CHANNEL_USERNAME,
-                user_id: ctx.from.id
-            }
-        });
-
-        const status = chatMember.data.result.status;
-        if (status === 'member' || status === 'administrator' || status === 'creator') {
-            const existingUser = await User.findOne({ telegramId: ctx.from.id });
-
-            if (existingUser) {
-                ctx.reply('✅ شما قبلاً ثبت‌نام کرده‌اید و می‌توانید از خدمات ربات استفاده کنید.');
-            } else {
-                ctx.reply('⚠️ شما هنوز ثبت‌نام نکرده‌اید. لطفاً ثبت‌نام کنید.', {
-                    reply_markup: {
-                        inline_keyboard: [[{ text: '📝 ثبت‌نام', callback_data: 'register_user' }]]
-                    }
-                });
-            }
-        } else {
-            ctx.reply('❌ شما هنوز عضو کانال نیستید! لطفاً ابتدا عضو شوید و سپس دوباره بررسی کنید.');
-        }
-    } catch (error) {
-        console.error(error);
-        ctx.reply('⚠️ خطایی رخ داد. لطفاً دوباره تلاش کنید.');
-    }
+bot.action("check_membership", async (ctx) => {
+  const isMember = await checkMembership(ctx);
+  if (isMember) {
+    return ctx.reply("✅ عضویت شما تأیید شد! حالا ثبت‌نام کنید.", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📝 ایجاد حساب کاربری", callback_data: "register_user" }],
+        ],
+      },
+    });
+  }
+  ctx.reply(
+    "❌ هنوز در کانال عضو نشده‌اید. لطفاً عضو شوید و مجدداً بررسی کنید."
+  );
 });
 
-bot.action('register_user', async (ctx) => {
-    const userId = ctx.from.id;
-    userRegistration.set(userId, { step: 1 });
-    ctx.reply('👤 لطفاً نام خود را وارد کنید:');
+bot.action("register_user", async (ctx) => {
+  await ctx.reply("لطفاً نام خود را ارسال کنید:");
+  ctx.session = { step: "first_name" };
 });
 
-bot.on('text', async (ctx) => {
-    const userId = ctx.from.id;
-    const registrationData = userRegistration.get(userId);
+bot.on("text", async (ctx) => {
+  if (!ctx.session) return;
 
-    if (!registrationData) return; // اگر کاربر در حال ثبت‌نام نبود، پیام را پردازش نکن
-
-    switch (registrationData.step) {
-        case 1:
-            registrationData.firstName = ctx.message.text;
-            registrationData.step = 2;
-            ctx.reply('🔤 لطفاً نام خانوادگی خود را وارد کنید:');
-            break;
-
-        case 2:
-            registrationData.lastName = ctx.message.text;
-            registrationData.step = 3;
-            ctx.reply('🆔 لطفاً کد ملی خود را وارد کنید:');
-            break;
-
-        case 3:
-            if (!/^\d{10}$/.test(ctx.message.text)) {
-                ctx.reply('⚠️ کد ملی نامعتبر است. لطفاً یک کد ملی ۱۰ رقمی وارد کنید.');
-                return;
-            }
-            registrationData.nationalId = ctx.message.text;
-            registrationData.step = 4;
-            ctx.reply('📞 لطفاً شماره تلفن همراه خود را وارد کنید:');
-            break;
-
-        case 4:
-            if (!/^09\d{9}$/.test(ctx.message.text)) {
-                ctx.reply('⚠️ شماره تلفن نامعتبر است. لطفاً یک شماره موبایل معتبر ایرانی وارد کنید.');
-                return;
-            }
-            registrationData.phoneNumber = ctx.message.text;
-
-            // ذخیره در دیتابیس
-            const newUser = new User({
-                telegramId: userId,
-                firstName: registrationData.firstName,
-                lastName: registrationData.lastName,
-                nationalId: registrationData.nationalId,
-                phoneNumber: registrationData.phoneNumber
-            });
-
-            try {
-                await newUser.save();
-                ctx.reply('✅ ثبت‌نام شما با موفقیت انجام شد! حالا می‌توانید از خدمات ربات استفاده کنید.');
-            } catch (error) {
-                console.error(error);
-                ctx.reply('❌ خطایی رخ داد. لطفاً بعداً دوباره تلاش کنید.');
-            }
-
-            userRegistration.delete(userId); // حذف وضعیت ثبت‌نام پس از تکمیل
-            break;
-    }
+  switch (ctx.session.step) {
+    case "first_name":
+      ctx.session.firstName = ctx.message.text;
+      ctx.session.step = "last_name";
+      await ctx.reply("لطفاً نام خانوادگی خود را ارسال کنید:");
+      break;
+    case "last_name":
+      ctx.session.lastName = ctx.message.text;
+      ctx.session.step = "national_id";
+      await ctx.reply("لطفاً کد ملی خود را ارسال کنید:");
+      break;
+    case "national_id":
+      ctx.session.nationalId = ctx.message.text;
+      ctx.session.step = "phone_number";
+      await ctx.reply("لطفاً شماره تلفن همراه خود را ارسال کنید:");
+      break;
+    case "phone_number":
+      ctx.session.phoneNumber = ctx.message.text;
+      await User.create({
+        telegramId: ctx.from.id,
+        firstName: ctx.session.firstName,
+        lastName: ctx.session.lastName,
+        nationalId: ctx.session.nationalId,
+        phoneNumber: ctx.session.phoneNumber,
+      });
+      await ctx.reply("✅ ثبت‌نام شما با موفقیت انجام شد!");
+      ctx.session = null;
+      break;
+  }
 });
 
 bot.launch();
-console.log('ربات فعال شد!');
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
